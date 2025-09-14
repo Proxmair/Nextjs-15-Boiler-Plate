@@ -2,6 +2,7 @@
 
 import { decrement, increment, reset } from '@/redux/slices/counterSlice';
 import { RootState } from '@/redux/store';
+import { Button } from '@heroui/react';
 import React from 'react'
 import { useDispatch, useSelector } from 'react-redux';
 
@@ -14,6 +15,7 @@ const SampleCounter = () => {
       <h1 className="text-2xl font-bold">Redux Persist Example</h1>
       <p className="text-lg">Count: {count}</p>
       <div className="flex gap-2">
+        <Button variant='solid' color='primary'  >Hero UI Button</Button>
         <button onClick={() => dispatch(increment())} className="px-4 py-2 bg-green-500 text-white rounded">
           +
         </button>
