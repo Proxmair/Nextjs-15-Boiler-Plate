@@ -1,9 +1,8 @@
+import HomeView from '@/views/home/HomeView'
 import { NextPage } from 'next'
 
-interface Props {}
-
-const Page: NextPage<Props> = ({}) => {
-  return <div>Home Page</div>
+const Page: NextPage = ({}) => {
+  return <div><HomeView/></div>
 }
 
 export default Page

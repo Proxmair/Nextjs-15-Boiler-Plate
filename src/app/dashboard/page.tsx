@@ -1,9 +1,7 @@
 import DashboardView from '@/views/dashboard/DashboardView'
 import { NextPage } from 'next'
 
-interface Props {}
-
-const Page: NextPage<Props> = ({}) => {
+const Page: NextPage = ({}) => {
   return <div><DashboardView/></div>
 }
 

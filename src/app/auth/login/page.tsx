@@ -1,9 +1,7 @@
 import LoginView from '@/views/login/LoginView'
 import { NextPage } from 'next'
 
-interface Props {}
-
-const Page: NextPage<Props> = ({}) => {
+const Page: NextPage = ({}) => {
   return <div><LoginView/></div>
 }
 
