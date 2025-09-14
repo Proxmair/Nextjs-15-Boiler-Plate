@@ -12,6 +12,7 @@
     "@heroui/react": "^2.8.4",
     "@reduxjs/toolkit": "^2.9.0",
     "framer-motion": "^12.23.12",
+    "mongoose": "^8.18.1",
     "next": "15.5.3",
     "react": "19.1.0",
     "react-dom": "19.1.0",
