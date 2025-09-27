@@ -57,9 +57,9 @@ export function addGround(scene: THREE.Scene) {
     return plane;
 }
 
-export function createCubeGroup(cubes: { x: number; y: number; z: number }[], color: number) {
+export function createCubeGroup(cubes: { x: number; y: number; z: number, color: number }[]) {
     const group = new THREE.Group();
-    cubes.forEach(({ x, y, z }) => {
+    cubes.forEach(({ x, y, z, color }) => {
         const geometry = new THREE.BoxGeometry();
         const material = new THREE.MeshStandardMaterial({ color });
         const cube = new THREE.Mesh(geometry, material);
@@ -68,24 +68,3 @@ export function createCubeGroup(cubes: { x: number; y: number; z: number }[], co
     });
     return group;
 }
-
-
-// Helper to add cube if not exists
-export const tryAddCube = (
-    group: THREE.Group,
-    cubes: { x: number; y: number; z: number }[],
-    pos: { x: number; y: number; z: number },
-    color: number,
-    dispatch: any
-) => {
-    const exists = cubes.some(cube =>
-        cube.x === pos.x && cube.y === pos.y && cube.z === pos.z
-    );
-    if (exists) return;
-    const geometry = new THREE.BoxGeometry();
-    const material = new THREE.MeshStandardMaterial({ color });
-    const cube = new THREE.Mesh(geometry, material);
-    cube.position.set(pos.x, pos.y, pos.z);
-    group.add(cube);
-    dispatch(addCube(pos));
-};

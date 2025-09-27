@@ -5,10 +5,10 @@ import { RootState } from '@/redux/store';
 import {
     addGrid, addGround, addLights,
     createCamera, createControls,
-    createCubeGroup, createRenderer, createScene,
-    tryAddCube
+    createCubeGroup, createRenderer, createScene
 } from "../helper";
-import { addCube } from "@/redux/slices/cubeSlice";
+import { addCube, changeCubeColor, removeCube } from "@/redux/slices/cubeSlice";
+import { addToast } from "@heroui/react";
 
 type ThreeCanvasProps = {
     color: number;
@@ -48,7 +48,7 @@ const ThreeCanvas = ({
         mountRef.current.appendChild(renderer.domElement);
 
         // Add cubes, lights, grid, ground
-        const group = createCubeGroup(cubes, color);
+        const group = createCubeGroup(cubes);
         scene.add(group);
         (scene as any).cubeGroup = group;
         // Expose camera and renderer for drag/drop calculations
@@ -56,7 +56,7 @@ const ThreeCanvas = ({
         (scene as any).renderer = renderer;
         addLights(scene);
         addGrid(scene);
-        const plane = addGround(scene);
+        addGround(scene);
 
         // Controls
         const controls = createControls(camera, renderer.domElement);
@@ -86,7 +86,7 @@ const ThreeCanvas = ({
             );
             outline.name = "selection-outline";
             // Prevent raycasting from selecting the outline
-            (outline as any).raycast = () => {};
+            (outline as any).raycast = () => { };
             outline.position.copy(mesh.position);
             outline.rotation.copy(mesh.rotation);
             outline.scale.copy(mesh.scale);
@@ -132,8 +132,37 @@ const ThreeCanvas = ({
             }
             clearAllSelection();
         };
-        renderer.domElement.addEventListener("click", handleCanvasClick);
 
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === "Delete" || event.key === "Backspace") {
+                selectedMeshesRef.current.forEach(mesh => {
+                    // Remove mesh from scene
+                    mesh.parent?.remove(mesh);
+
+                    // Remove outline if exists
+                    const outline = outlineMapRef.current.get(mesh);
+                    if (outline && outline.parent) outline.parent.remove(outline);
+                    if (outline) {
+                        outline.geometry.dispose();
+                        (outline.material as THREE.Material).dispose();
+                        outlineMapRef.current.delete(mesh);
+                    }
+                    dispatch(removeCube({
+                        x: mesh.position.x,
+                        y: mesh.position.y,
+                        z: mesh.position.z
+                    }));
+
+
+                });
+
+                // Clear selection
+                selectedMeshesRef.current.clear();
+                selectedMeshRef.current = null;
+            }
+        };
+        renderer.domElement.addEventListener("click", handleCanvasClick);
+        window.addEventListener("keydown", handleKeyDown);
         // Animation loop
         let frameId: number;
         const animate = () => {
@@ -150,6 +179,7 @@ const ThreeCanvas = ({
             if (frameId) cancelAnimationFrame(frameId);
             renderer.dispose();
             renderer.domElement.removeEventListener("click", handleCanvasClick);
+            window.removeEventListener("keydown", handleKeyDown);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
@@ -160,6 +190,8 @@ const ThreeCanvas = ({
         selectedMeshesRef.current.forEach(mesh => {
             const mat = mesh.material as THREE.MeshStandardMaterial;
             mat.color.set(color);
+            const index = cubes.findIndex(c => c.x === mesh.position.x && c.y === mesh.position.y && c.z === mesh.position.z);
+            dispatch(changeCubeColor({ index, color }));
         });
     }, [color]);
 
@@ -253,10 +285,19 @@ const ThreeCanvas = ({
             const geometry = new THREE.BoxGeometry();
             const material = new THREE.MeshStandardMaterial({ color: colorRef.current });
             const cube = new THREE.Mesh(geometry, material);
-            cube.position.set(Math.round(x), 0.5, Math.round(z));
-            group.add(cube);
-            dispatch(addCube({ x: Math.round(x), y: 0.5, z: Math.round(z) }));
-
+            const index = cubes.findIndex(c => c.x === Math.round(x) && c.z === Math.round(z));
+            if (index === -1) {
+                cube.position.set(Math.round(x), 0.5, Math.round(z));
+                group.add(cube);
+                dispatch(addCube({ x: Math.round(x), y: 0.5, z: Math.round(z), color: colorRef.current }));
+            }
+            else {
+                addToast({
+                    title: "Cannot place cube",
+                    description: "A cube already exists at this location. Please choose another location.",
+                    color: 'danger',
+                })
+            }
         }
 
         // Clear ghost after drop
@@ -278,6 +319,9 @@ const ThreeCanvas = ({
             ghostMeshRef.current = null;
         }
     };
+
+
+
 
     return <div ref={mountRef} style={{ flex: 1 }} onDragOver={handleDragOver} onDrop={handleDrop} onDragLeave={handleDragLeave} />;
 };
