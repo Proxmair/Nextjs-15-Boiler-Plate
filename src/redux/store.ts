@@ -2,9 +2,11 @@ import { configureStore, combineReducers } from "@reduxjs/toolkit";
 import { persistReducer, persistStore } from "redux-persist";
 import storage from "redux-persist/lib/storage"; // defaults to localStorage
 import counterReducer from "./slices/counterSlice";
+import cubeReducer from "./slices/cubeSlice";
 
 const rootReducer = combineReducers({
   counter: counterReducer,
+  cubes: cubeReducer,
 });
 
 const persistConfig = {
