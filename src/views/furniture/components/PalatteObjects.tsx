@@ -1,7 +1,7 @@
 import { useRef, useEffect } from "react";
 import * as THREE from "three";
 import { Card, CardBody } from "@heroui/react";
-import { createScene, createCamera, createRenderer, addLights } from "../helper";
+import { createScene, createCamera, createRenderer, addLights, createFurnitureMesh } from "../helper";
 import { useSelector } from "react-redux";
 import { RootState } from '@/redux/store';
 
@@ -20,7 +20,7 @@ const PaletteObjects = () => {
         e.dataTransfer.setDragImage(transparent, 0, 0);
     };
 
-    // mini 3D cube preview
+    // mini 3D furniture preview
     useEffect(() => {
         if (!mountRef.current) return;
         mountRef.current.innerHTML = "";
@@ -29,22 +29,28 @@ const PaletteObjects = () => {
         const height = 72;
         const scene = createScene(0xf7f7f7);
         const camera = createCamera(width, height);
-        camera.position.set(1.6, 1.6, 1.6);
+        camera.position.set(2, 2, 2);
         camera.lookAt(0, 0, 0);
         const renderer = createRenderer(width, height);
         mountRef.current.appendChild(renderer.domElement);
 
         addLights(scene);
 
-        const geometry = new THREE.BoxGeometry(1, 1, 1);
-        const material = new THREE.MeshStandardMaterial({ color: selectedColor, roughness: 0.6, metalness: 0.1 });
-        const cube = new THREE.Mesh(geometry, material);
-        scene.add(cube);
-
+        let furnitureObject: THREE.Object3D | null = null;
         let frameId: number;
+
+        // Load the furniture object
+        createFurnitureMesh(selectedColor).then((object) => {
+            furnitureObject = object;
+            scene.add(object);
+        }).catch((error) => {
+            console.error("Error loading furniture for palette:", error);
+        });
+
         const animate = () => {
-            cube.rotation.x += 0.01;
-            cube.rotation.y += 0.02;
+            if (furnitureObject) {
+                furnitureObject.rotation.y += 0.02;
+            }
             renderer.render(scene, camera);
             frameId = requestAnimationFrame(animate);
         };
@@ -52,9 +58,25 @@ const PaletteObjects = () => {
 
         return () => {
             if (frameId) cancelAnimationFrame(frameId);
+            if (furnitureObject) {
+                // Dispose of furniture object
+                furnitureObject.traverse((child) => {
+                    if ((child as THREE.Mesh).isMesh) {
+                        const meshChild = child as THREE.Mesh;
+                        if (meshChild.geometry) meshChild.geometry.dispose();
+                        if (meshChild.material) {
+                            if (Array.isArray(meshChild.material)) {
+                                meshChild.material.forEach((material: THREE.Material) => material.dispose());
+                            } else {
+                                meshChild.material.dispose();
+                            }
+                        }
+                    }
+                });
+            }
             renderer.dispose();
         };
-    }, []);
+    }, [selectedColor]);
     return (
         <Card>
             <CardBody className="flex items-center gap-3">
@@ -62,11 +84,11 @@ const PaletteObjects = () => {
                     draggable
                     onDragStart={handleDragStart}
                     className="w-18 h-18 rounded-sm cursor-grab flex items-center justify-center bg-transparent"
-                    title="Drag to canvas to add a square"
+                    title="Drag to canvas to add furniture"
                 >
                     <div ref={mountRef} />
                 </div>
-                <span>Square</span>
+                <span>Sofa</span>
             </CardBody>
         </Card>
     );

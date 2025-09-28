@@ -342,28 +342,61 @@ const ThreeCanvas = ({
         const { x, z } = hit[0].point;
 
         if (payload?.type === "square") {
-            const index = cubes.findIndex(c => c.x === Math.round(x) && c.z === Math.round(z));
-            if (index === -1) {
-                createFurnitureMesh(colorRef.current).then((furnitureObject) => {
-                    furnitureObject.position.set(Math.round(x), 0.5, Math.round(z));
+            // Check for collisions with existing furniture objects
+            const newPosition = { x: Math.round(x), y: 0.5, z: Math.round(z) };
+            
+            // First create a temporary furniture object to check its bounding box
+            createFurnitureMesh(colorRef.current).then((furnitureObject) => {
+                furnitureObject.position.set(newPosition.x, newPosition.y, newPosition.z);
+                
+                // Calculate bounding box for the new furniture object
+                const newBox = new THREE.Box3().setFromObject(furnitureObject);
+                
+                // Check for intersections with existing furniture objects
+                let hasCollision = false;
+                group.children.forEach((existingObject) => {
+                    if (existingObject.name !== "ghost-furniture" && existingObject.name !== "selection-outline") {
+                        const existingBox = new THREE.Box3().setFromObject(existingObject);
+                        if (newBox.intersectsBox(existingBox)) {
+                            hasCollision = true;
+                        }
+                    }
+                });
+                
+                if (!hasCollision) {
+                    // No collision, add the furniture object
                     group.add(furnitureObject);
-                    dispatch(addCube({ x: Math.round(x), y: 0.5, z: Math.round(z), color: colorRef.current }));
-                }).catch((error) => {
-                    console.error("Error creating furniture object:", error);
+                    dispatch(addCube({ x: newPosition.x, y: newPosition.y, z: newPosition.z, color: colorRef.current }));
+                } else {
+                    // Collision detected, show error and dispose of the temporary object
+                    furnitureObject.traverse((child) => {
+                        if ((child as THREE.Mesh).isMesh) {
+                            const meshChild = child as THREE.Mesh;
+                            if (meshChild.geometry) meshChild.geometry.dispose();
+                            if (meshChild.material) {
+                                if (Array.isArray(meshChild.material)) {
+                                    meshChild.material.forEach((material: THREE.Material) => material.dispose());
+                                } else {
+                                    meshChild.material.dispose();
+                                }
+                            }
+                        }
+                    });
+                    
                     addToast({
-                        title: "Error",
-                        description: "Failed to load furniture object. Please try again.",
+                        title: "Cannot place furniture",
+                        description: "Furniture would intersect with existing objects. Please choose another location.",
                         color: 'danger',
                     });
-                });
-            }
-            else {
+                }
+            }).catch((error) => {
+                console.error("Error creating furniture object:", error);
                 addToast({
-                    title: "Cannot place furniture",
-                    description: "Furniture already exists at this location. Please choose another location.",
+                    title: "Error",
+                    description: "Failed to load furniture object. Please try again.",
                     color: 'danger',
-                })
-            }
+                });
+            });
         }
 
         // Clear ghost after drop
