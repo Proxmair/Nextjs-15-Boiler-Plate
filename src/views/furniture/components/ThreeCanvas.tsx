@@ -5,10 +5,11 @@ import { RootState } from '@/redux/store';
 import {
     addGrid, addGround, addLights,
     createCamera, createControls,
-    createCubeGroup, createRenderer, createScene
+    createCubeGroup, createRenderer, createScene, createFurnitureMesh
 } from "../helper";
 import { addCube, changeCubeColor, removeCube } from "@/redux/slices/cubeSlice";
 import { addToast } from "@heroui/react";
+import { OBJLoader } from "three/examples/jsm/Addons.js";
 
 type ThreeCanvasProps = {
     color: number;
@@ -65,33 +66,54 @@ const ThreeCanvas = ({
         const raycaster = new THREE.Raycaster();
         const mouse = new THREE.Vector2();
 
-        const removeOutline = (mesh: THREE.Mesh) => {
-            const outline = outlineMapRef.current.get(mesh);
+        // Load existing furniture objects
+        const loadExistingFurniture = async () => {
+            for (const cube of cubes) {
+                try {
+                    const furnitureObject = await createFurnitureMesh(cube.color);
+                    furnitureObject.position.set(cube.x, cube.y, cube.z);
+                    group.add(furnitureObject);
+                } catch (error) {
+                    console.error("Error loading furniture object:", error);
+                }
+            }
+        };
+        loadExistingFurniture();
+
+
+        const removeOutline = (furnitureObject: THREE.Object3D) => {
+            const outline = outlineMapRef.current.get(furnitureObject as THREE.Mesh);
             if (outline && outline.parent) {
                 outline.parent.remove(outline);
             }
             if (outline) {
                 outline.geometry.dispose();
                 (outline.material as THREE.Material).dispose();
-                outlineMapRef.current.delete(mesh);
+                outlineMapRef.current.delete(furnitureObject as THREE.Mesh);
             }
         };
 
-        const addOutline = (mesh: THREE.Mesh) => {
-            if (outlineMapRef.current.has(mesh)) return;
-            const edges = new THREE.EdgesGeometry(mesh.geometry as THREE.BufferGeometry);
+        const addOutline = (furnitureObject: THREE.Object3D) => {
+            if (outlineMapRef.current.has(furnitureObject as THREE.Mesh)) return;
+            
+            // Create a bounding box outline for the furniture object
+            const box = new THREE.Box3().setFromObject(furnitureObject);
+            const size = box.getSize(new THREE.Vector3());
+            const center = box.getCenter(new THREE.Vector3());
+            
+            const geometry = new THREE.BoxGeometry(size.x, size.y, size.z);
+            const edges = new THREE.EdgesGeometry(geometry);
             const outline = new THREE.LineSegments(
                 edges,
-                new THREE.LineBasicMaterial({ color: 0xffff00 })
+                new THREE.LineBasicMaterial({ color: 0xffff00, linewidth: 2 })
             );
             outline.name = "selection-outline";
             // Prevent raycasting from selecting the outline
             (outline as any).raycast = () => { };
-            outline.position.copy(mesh.position);
-            outline.rotation.copy(mesh.rotation);
-            outline.scale.copy(mesh.scale);
+            outline.position.copy(center);
+            outline.rotation.copy(furnitureObject.rotation);
             group.add(outline);
-            outlineMapRef.current.set(mesh, outline);
+            outlineMapRef.current.set(furnitureObject as THREE.Mesh, outline);
         };
 
         const clearAllSelection = () => {
@@ -106,29 +128,35 @@ const ThreeCanvas = ({
             mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
             raycaster.setFromCamera(mouse, camera);
 
-            // First try selecting an existing mesh in the group
-            const groupIntersects = raycaster.intersectObjects(group.children, false);
-            const meshHit = groupIntersects.find(i => i.object instanceof THREE.Mesh) as THREE.Intersection | undefined;
-            if (meshHit) {
-                const hit = meshHit.object as THREE.Mesh;
-                const additive = event.ctrlKey || (event as any).metaKey;
-                if (!additive) {
-                    clearAllSelection();
-                    selectedMeshesRef.current.add(hit);
-                    selectedMeshRef.current = hit;
-                    addOutline(hit);
-                } else {
-                    if (selectedMeshesRef.current.has(hit)) {
-                        selectedMeshesRef.current.delete(hit);
-                        if (selectedMeshRef.current === hit) selectedMeshRef.current = null;
-                        removeOutline(hit);
-                    } else {
-                        selectedMeshesRef.current.add(hit);
-                        selectedMeshRef.current = hit;
-                        addOutline(hit);
-                    }
+            // First try selecting an existing object in the group
+            const groupIntersects = raycaster.intersectObjects(group.children, true);
+            if (groupIntersects.length > 0) {
+                // Find the parent furniture object (not individual child meshes)
+                let furnitureObject: THREE.Object3D | null = groupIntersects[0].object;
+                while (furnitureObject && furnitureObject.parent !== group) {
+                    furnitureObject = furnitureObject.parent;
                 }
-                return;
+                
+                if (furnitureObject && furnitureObject.parent === group) {
+                    const additive = event.ctrlKey || (event as any).metaKey;
+                    if (!additive) {
+                        clearAllSelection();
+                        selectedMeshesRef.current.add(furnitureObject as THREE.Mesh);
+                        selectedMeshRef.current = furnitureObject as THREE.Mesh;
+                        addOutline(furnitureObject);
+                    } else {
+                        if (selectedMeshesRef.current.has(furnitureObject as THREE.Mesh)) {
+                            selectedMeshesRef.current.delete(furnitureObject as THREE.Mesh);
+                            if (selectedMeshRef.current === furnitureObject) selectedMeshRef.current = null;
+                            removeOutline(furnitureObject);
+                        } else {
+                            selectedMeshesRef.current.add(furnitureObject as THREE.Mesh);
+                            selectedMeshRef.current = furnitureObject as THREE.Mesh;
+                            addOutline(furnitureObject);
+                        }
+                    }
+                    return;
+                }
             }
             clearAllSelection();
         };
@@ -188,8 +216,16 @@ const ThreeCanvas = ({
     useEffect(() => {
         if (!selectedMeshesRef.current) return;
         selectedMeshesRef.current.forEach(mesh => {
-            const mat = mesh.material as THREE.MeshStandardMaterial;
-            mat.color.set(color);
+            // For 3D objects, we need to traverse and update all child meshes
+            mesh.traverse((child) => {
+                if ((child as THREE.Mesh).isMesh) {
+                    const meshChild = child as THREE.Mesh;
+                    const mat = meshChild.material as THREE.MeshStandardMaterial;
+                    if (mat && mat.color) {
+                        mat.color.set(color);
+                    }
+                }
+            });
             const index = cubes.findIndex(c => c.x === mesh.position.x && c.y === mesh.position.y && c.z === mesh.position.z);
             dispatch(changeCubeColor({ index, color }));
         });
@@ -224,24 +260,48 @@ const ThreeCanvas = ({
         if (hit.length === 0) return;
         const { x, z } = hit[0].point;
 
-        // Lazily create ghost cube
+        // Lazily create ghost furniture object
         if (!ghostMeshRef.current) {
-            const geometry = new THREE.BoxGeometry(1, 1, 1);
-            const material = new THREE.MeshStandardMaterial({
-                color: colorRef.current,
-                transparent: true,
-                opacity: 0.35,
-                depthWrite: false,
+            createFurnitureMesh(colorRef.current).then((furnitureObject) => {
+                furnitureObject.traverse((child) => {
+                    if ((child as THREE.Mesh).isMesh) {
+                        (child as THREE.Mesh).material = new THREE.MeshStandardMaterial({
+                            color: colorRef.current,
+                            transparent: true,
+                            opacity: 0.35,
+                            depthWrite: false,
+                        });
+                    }
+                });
+                furnitureObject.name = "ghost-furniture";
+                group.add(furnitureObject);
+                ghostMeshRef.current = furnitureObject as THREE.Mesh;
+                
+                // Position the ghost after it's created
+                const ghost = ghostMeshRef.current;
+                if (ghost) {
+                    ghost.visible = true;
+                    ghost.position.set(Math.round(x), 0.5, Math.round(z));
+                }
+            }).catch((error) => {
+                console.error("Error creating ghost furniture:", error);
             });
-            const ghost = new THREE.Mesh(geometry, material);
-            ghost.name = "ghost-cube";
-            group.add(ghost);
-            ghostMeshRef.current = ghost;
+        } else {
+            // Update existing ghost
+            const ghost = ghostMeshRef.current;
+            // Update color for all child meshes in the furniture object
+            ghost.traverse((child) => {
+                if ((child as THREE.Mesh).isMesh) {
+                    const meshChild = child as THREE.Mesh;
+                    const mat = meshChild.material as THREE.MeshStandardMaterial;
+                    if (mat && mat.color) {
+                        mat.color.set(colorRef.current);
+                    }
+                }
+            });
+            ghost.visible = true;
+            ghost.position.set(Math.round(x), 0.5, Math.round(z));
         }
-        const ghost = ghostMeshRef.current!;
-        (ghost.material as THREE.MeshStandardMaterial).color.set(colorRef.current);
-        ghost.visible = true;
-        ghost.position.set(Math.round(x), 0.5, Math.round(z));
     };
 
     const handleDrop: React.DragEventHandler<HTMLDivElement> = (e) => {
@@ -282,19 +342,25 @@ const ThreeCanvas = ({
         const { x, z } = hit[0].point;
 
         if (payload?.type === "square") {
-            const geometry = new THREE.BoxGeometry();
-            const material = new THREE.MeshStandardMaterial({ color: colorRef.current });
-            const cube = new THREE.Mesh(geometry, material);
             const index = cubes.findIndex(c => c.x === Math.round(x) && c.z === Math.round(z));
             if (index === -1) {
-                cube.position.set(Math.round(x), 0.5, Math.round(z));
-                group.add(cube);
-                dispatch(addCube({ x: Math.round(x), y: 0.5, z: Math.round(z), color: colorRef.current }));
+                createFurnitureMesh(colorRef.current).then((furnitureObject) => {
+                    furnitureObject.position.set(Math.round(x), 0.5, Math.round(z));
+                    group.add(furnitureObject);
+                    dispatch(addCube({ x: Math.round(x), y: 0.5, z: Math.round(z), color: colorRef.current }));
+                }).catch((error) => {
+                    console.error("Error creating furniture object:", error);
+                    addToast({
+                        title: "Error",
+                        description: "Failed to load furniture object. Please try again.",
+                        color: 'danger',
+                    });
+                });
             }
             else {
                 addToast({
-                    title: "Cannot place cube",
-                    description: "A cube already exists at this location. Please choose another location.",
+                    title: "Cannot place furniture",
+                    description: "Furniture already exists at this location. Please choose another location.",
                     color: 'danger',
                 })
             }
@@ -303,8 +369,20 @@ const ThreeCanvas = ({
         // Clear ghost after drop
         if (ghostMeshRef.current) {
             group.remove(ghostMeshRef.current);
-            ghostMeshRef.current.geometry.dispose();
-            (ghostMeshRef.current.material as THREE.Material).dispose();
+            // Dispose of all geometries and materials in the furniture object
+            ghostMeshRef.current.traverse((child) => {
+                if ((child as THREE.Mesh).isMesh) {
+                    const meshChild = child as THREE.Mesh;
+                    if (meshChild.geometry) meshChild.geometry.dispose();
+                    if (meshChild.material) {
+                        if (Array.isArray(meshChild.material)) {
+                            meshChild.material.forEach((material: THREE.Material) => material.dispose());
+                        } else {
+                            meshChild.material.dispose();
+                        }
+                    }
+                }
+            });
             ghostMeshRef.current = null;
         }
     };
@@ -314,8 +392,20 @@ const ThreeCanvas = ({
         const group = scene?.cubeGroup as THREE.Group | undefined;
         if (ghostMeshRef.current && group) {
             group.remove(ghostMeshRef.current);
-            ghostMeshRef.current.geometry.dispose();
-            (ghostMeshRef.current.material as THREE.Material).dispose();
+            // Dispose of all geometries and materials in the furniture object
+            ghostMeshRef.current.traverse((child) => {
+                if ((child as THREE.Mesh).isMesh) {
+                    const meshChild = child as THREE.Mesh;
+                    if (meshChild.geometry) meshChild.geometry.dispose();
+                    if (meshChild.material) {
+                        if (Array.isArray(meshChild.material)) {
+                            meshChild.material.forEach((material: THREE.Material) => material.dispose());
+                        } else {
+                            meshChild.material.dispose();
+                        }
+                    }
+                }
+            });
             ghostMeshRef.current = null;
         }
     };

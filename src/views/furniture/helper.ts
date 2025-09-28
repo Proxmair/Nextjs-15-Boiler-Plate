@@ -1,6 +1,6 @@
 import { addCube } from "@/redux/slices/cubeSlice";
 import * as THREE from "three";
-import { OrbitControls } from "three/examples/jsm/Addons.js";
+import { OrbitControls, OBJLoader } from "three/examples/jsm/Addons.js";
 
 export function createScene(background = 0xf0f0f0) {
     const scene = new THREE.Scene();
@@ -57,14 +57,33 @@ export function addGround(scene: THREE.Scene) {
     return plane;
 }
 
+export function createFurnitureMesh(color: number): Promise<THREE.Object3D> {
+    return new Promise((resolve, reject) => {
+        const loader = new OBJLoader();
+        loader.load(
+            "/3dobjects/sofa/Koltuk.obj",
+            (object) => {
+                object.traverse((child) => {
+                    if ((child as THREE.Mesh).isMesh) {
+                        (child as THREE.Mesh).material = new THREE.MeshStandardMaterial({
+                            color: color,
+                        });
+                    }
+                });
+                resolve(object);
+            },
+            undefined,
+            (error) => {
+                console.error("Error loading OBJ:", error);
+                reject(error);
+            }
+        );
+    });
+}
+
 export function createCubeGroup(cubes: { x: number; y: number; z: number, color: number }[]) {
     const group = new THREE.Group();
-    cubes.forEach(({ x, y, z, color }) => {
-        const geometry = new THREE.BoxGeometry();
-        const material = new THREE.MeshStandardMaterial({ color });
-        const cube = new THREE.Mesh(geometry, material);
-        cube.position.set(x, y, z);
-        group.add(cube);
-    });
+    // For now, we'll create a placeholder group and load objects asynchronously
+    // This will be handled in the main component
     return group;
 }
