@@ -1,4 +1,3 @@
-import { addCube } from "@/redux/slices/cubeSlice";
 import * as THREE from "three";
 import { OrbitControls, OBJLoader } from "three/examples/jsm/Addons.js";
 
@@ -81,9 +80,53 @@ export function createFurnitureMesh(color: number): Promise<THREE.Object3D> {
     });
 }
 
-export function createCubeGroup(cubes: { x: number; y: number; z: number, color: number }[]) {
-    const group = new THREE.Group();
-    // For now, we'll create a placeholder group and load objects asynchronously
-    // This will be handled in the main component
-    return group;
-}
+export const loadExistingFurniture = async (cubes: { x: number; y: number; z: number, color: number }[], group: any) => {
+    for (const cube of cubes) {
+        try {
+            const furnitureObject = await createFurnitureMesh(cube.color);
+            furnitureObject.position.set(cube.x, cube.y, cube.z);
+            group.add(furnitureObject);
+        } catch (error) {
+            console.error("Error loading furniture object:", error);
+        }
+    }
+};
+
+
+export const removeOutline = (
+    furnitureObject: THREE.Object3D,
+    outlineMapRef: React.RefObject<Map<THREE.Mesh, THREE.LineSegments>>
+) => {
+    const outline = outlineMapRef.current?.get(furnitureObject as THREE.Mesh);
+    if (outline && outline.parent) {
+        outline.parent.remove(outline);
+    }
+    if (outline) {
+        outline.geometry.dispose();
+        (outline.material as THREE.Material).dispose();
+        outlineMapRef.current?.delete(furnitureObject as THREE.Mesh);
+    }
+};
+
+export const addOutline = (furnitureObject: THREE.Object3D, outlineMapRef: React.RefObject<Map<THREE.Mesh, THREE.LineSegments>>, group: any) => {
+    if (outlineMapRef.current.has(furnitureObject as THREE.Mesh)) return;
+
+    // Create a bounding box outline for the furniture object
+    const box = new THREE.Box3().setFromObject(furnitureObject);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+
+    const geometry = new THREE.BoxGeometry(size.x, size.y, size.z);
+    const edges = new THREE.EdgesGeometry(geometry);
+    const outline = new THREE.LineSegments(
+        edges,
+        new THREE.LineBasicMaterial({ color: 0xffff00, linewidth: 2 })
+    );
+    outline.name = "selection-outline";
+    // Prevent raycasting from selecting the outline
+    (outline as any).raycast = () => { };
+    outline.position.copy(center);
+    outline.rotation.copy(furnitureObject.rotation);
+    group.add(outline);
+    outlineMapRef.current.set(furnitureObject as THREE.Mesh, outline);
+};

@@ -5,11 +5,13 @@ import { RootState } from '@/redux/store';
 import {
     addGrid, addGround, addLights,
     createCamera, createControls,
-    createCubeGroup, createRenderer, createScene, createFurnitureMesh
+    createRenderer, createScene, createFurnitureMesh,
+    loadExistingFurniture,
+    removeOutline,
+    addOutline
 } from "../helper";
 import { addCube, changeCubeColor, removeCube } from "@/redux/slices/cubeSlice";
 import { addToast } from "@heroui/react";
-import { OBJLoader } from "three/examples/jsm/Addons.js";
 
 type ThreeCanvasProps = {
     color: number;
@@ -49,7 +51,7 @@ const ThreeCanvas = ({
         mountRef.current.appendChild(renderer.domElement);
 
         // Add cubes, lights, grid, ground
-        const group = createCubeGroup(cubes);
+        const group = new THREE.Group();
         scene.add(group);
         (scene as any).cubeGroup = group;
         // Expose camera and renderer for drag/drop calculations
@@ -58,6 +60,7 @@ const ThreeCanvas = ({
         addLights(scene);
         addGrid(scene);
         addGround(scene);
+        loadExistingFurniture(cubes, group);
 
         // Controls
         const controls = createControls(camera, renderer.domElement);
@@ -66,59 +69,9 @@ const ThreeCanvas = ({
         const raycaster = new THREE.Raycaster();
         const mouse = new THREE.Vector2();
 
-        // Load existing furniture objects
-        const loadExistingFurniture = async () => {
-            for (const cube of cubes) {
-                try {
-                    const furnitureObject = await createFurnitureMesh(cube.color);
-                    furnitureObject.position.set(cube.x, cube.y, cube.z);
-                    group.add(furnitureObject);
-                } catch (error) {
-                    console.error("Error loading furniture object:", error);
-                }
-            }
-        };
-        loadExistingFurniture();
-
-
-        const removeOutline = (furnitureObject: THREE.Object3D) => {
-            const outline = outlineMapRef.current.get(furnitureObject as THREE.Mesh);
-            if (outline && outline.parent) {
-                outline.parent.remove(outline);
-            }
-            if (outline) {
-                outline.geometry.dispose();
-                (outline.material as THREE.Material).dispose();
-                outlineMapRef.current.delete(furnitureObject as THREE.Mesh);
-            }
-        };
-
-        const addOutline = (furnitureObject: THREE.Object3D) => {
-            if (outlineMapRef.current.has(furnitureObject as THREE.Mesh)) return;
-            
-            // Create a bounding box outline for the furniture object
-            const box = new THREE.Box3().setFromObject(furnitureObject);
-            const size = box.getSize(new THREE.Vector3());
-            const center = box.getCenter(new THREE.Vector3());
-            
-            const geometry = new THREE.BoxGeometry(size.x, size.y, size.z);
-            const edges = new THREE.EdgesGeometry(geometry);
-            const outline = new THREE.LineSegments(
-                edges,
-                new THREE.LineBasicMaterial({ color: 0xffff00, linewidth: 2 })
-            );
-            outline.name = "selection-outline";
-            // Prevent raycasting from selecting the outline
-            (outline as any).raycast = () => { };
-            outline.position.copy(center);
-            outline.rotation.copy(furnitureObject.rotation);
-            group.add(outline);
-            outlineMapRef.current.set(furnitureObject as THREE.Mesh, outline);
-        };
-
         const clearAllSelection = () => {
             selectedMeshRef.current = null;
-            selectedMeshesRef.current.forEach(m => removeOutline(m));
+            selectedMeshesRef.current.forEach(m => removeOutline(m, outlineMapRef));
             selectedMeshesRef.current.clear();
         };
 
@@ -136,23 +89,23 @@ const ThreeCanvas = ({
                 while (furnitureObject && furnitureObject.parent !== group) {
                     furnitureObject = furnitureObject.parent;
                 }
-                
+
                 if (furnitureObject && furnitureObject.parent === group) {
                     const additive = event.ctrlKey || (event as any).metaKey;
                     if (!additive) {
                         clearAllSelection();
                         selectedMeshesRef.current.add(furnitureObject as THREE.Mesh);
                         selectedMeshRef.current = furnitureObject as THREE.Mesh;
-                        addOutline(furnitureObject);
+                        addOutline(furnitureObject, outlineMapRef, group);
                     } else {
                         if (selectedMeshesRef.current.has(furnitureObject as THREE.Mesh)) {
                             selectedMeshesRef.current.delete(furnitureObject as THREE.Mesh);
                             if (selectedMeshRef.current === furnitureObject) selectedMeshRef.current = null;
-                            removeOutline(furnitureObject);
+                            removeOutline(furnitureObject, outlineMapRef);
                         } else {
                             selectedMeshesRef.current.add(furnitureObject as THREE.Mesh);
                             selectedMeshRef.current = furnitureObject as THREE.Mesh;
-                            addOutline(furnitureObject);
+                            addOutline(furnitureObject, outlineMapRef, group);
                         }
                     }
                     return;
@@ -276,7 +229,7 @@ const ThreeCanvas = ({
                 furnitureObject.name = "ghost-furniture";
                 group.add(furnitureObject);
                 ghostMeshRef.current = furnitureObject as THREE.Mesh;
-                
+
                 // Position the ghost after it's created
                 const ghost = ghostMeshRef.current;
                 if (ghost) {
@@ -314,15 +267,10 @@ const ThreeCanvas = ({
         const scene = sceneRef.current as any;
         const group = scene.cubeGroup as THREE.Group;
         const camera = (scene as any).camera as THREE.Camera | undefined;
-        const renderer = (scene as any).renderer as THREE.WebGLRenderer | undefined;
 
-        // Fallback: compute using the internal refs created earlier in effect
-        // We will raycast using the plane that was created and stored on the scene
         const plane = scene.children.find((c: any) => c.name === "ground") as THREE.Mesh | undefined;
         if (!plane) return;
-
-        // We need a camera and renderer bounds to convert mouse pos
-        // As we did not store them on scene, we approximate by using the target element bounds
+        
         const container = mountRef.current;
         if (!container) return;
 
@@ -344,14 +292,14 @@ const ThreeCanvas = ({
         if (payload?.type === "square") {
             // Check for collisions with existing furniture objects
             const newPosition = { x: Math.round(x), y: 0.5, z: Math.round(z) };
-            
+
             // First create a temporary furniture object to check its bounding box
             createFurnitureMesh(colorRef.current).then((furnitureObject) => {
                 furnitureObject.position.set(newPosition.x, newPosition.y, newPosition.z);
-                
+
                 // Calculate bounding box for the new furniture object
                 const newBox = new THREE.Box3().setFromObject(furnitureObject);
-                
+
                 // Check for intersections with existing furniture objects
                 let hasCollision = false;
                 group.children.forEach((existingObject) => {
@@ -362,7 +310,7 @@ const ThreeCanvas = ({
                         }
                     }
                 });
-                
+
                 if (!hasCollision) {
                     // No collision, add the furniture object
                     group.add(furnitureObject);
@@ -382,7 +330,7 @@ const ThreeCanvas = ({
                             }
                         }
                     });
-                    
+
                     addToast({
                         title: "Cannot place furniture",
                         description: "Furniture would intersect with existing objects. Please choose another location.",
@@ -442,10 +390,6 @@ const ThreeCanvas = ({
             ghostMeshRef.current = null;
         }
     };
-
-
-
-
     return <div ref={mountRef} style={{ flex: 1 }} onDragOver={handleDragOver} onDrop={handleDrop} onDragLeave={handleDragLeave} />;
 };
 
